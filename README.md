@@ -11,6 +11,29 @@ tables, reasons over the numbers, and gives a concrete recommendation.
 
 ---
 
+## Quickstart
+
+> Runs **inside an Azure Databricks workspace** (needs Unity Catalog + the
+> `databricks-meta-llama-3-3-70b-instruct` serving endpoint). It is not a local app.
+
+1. **Import** `notebooks/01_setup.py` and `notebooks/02_agent.py` into your
+   workspace (Databricks notebook source format).
+2. **Setup** — run `01_setup.py` top to bottom. It downloads the Dunnhumby
+   dataset from Kaggle and writes three Delta tables into
+   `databricks_cpg.cpg_demo`. The final `SHOW TABLES` cell should list
+   `transactions`, `causal`, `products`.
+3. **Run the agent** — run `02_agent.py`. The last cell asks a sample question and
+   prints the answer inline; the full reasoning trace lands in the MLflow
+   experiment `/cpg-promo-agent`.
+4. **Ask your own** — edit the `"input"` string in the final cell, e.g.
+   *"What's the promo lift for the GROCERY department?"*
+
+> Using a different catalog? Replace `databricks_cpg` everywhere in both notebooks.
+> Local-only? See [Local dev](#local-dev-optional) — only the dataset is
+> reproducible locally; the agent needs Databricks.
+
+---
+
 ## Background: the business problem
 
 **Trade promotion is one of the largest line items on a CPG company's P&L** —
