@@ -8,6 +8,7 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 import mlflow
+import pandas as pd
 from databricks_langchain import ChatDatabricks
 from langchain_core.tools import tool
 from langchain.agents import AgentExecutor, create_tool_calling_agent
@@ -40,11 +41,16 @@ def get_promo_lift(department: str) -> str:
         return f"No data for department: {department}"
 
     row = result.iloc[0]
-    lift = ((row["promo_sales"] - row["base_sales"]) / row["base_sales"] * 100) if row["base_sales"] else 0
+    promo, base = row["promo_sales"], row["base_sales"]
+    if pd.isna(base) or base == 0:
+        return f"Department: {row['DEPARTMENT']} | No non-promo baseline sales — lift undefined."
+    if pd.isna(promo):
+        return f"Department: {row['DEPARTMENT']} | No on-promo sales — lift undefined."
+    lift = (promo - base) / base * 100
     return (
         f"Department: {row['DEPARTMENT']} | "
-        f"Base avg sale: ${row['base_sales']:.2f} | "
-        f"Promo avg sale: ${row['promo_sales']:.2f} | "
+        f"Base avg sale: ${base:.2f} | "
+        f"Promo avg sale: ${promo:.2f} | "
         f"Lift: {lift:.1f}%"
     )
 
