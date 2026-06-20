@@ -55,7 +55,7 @@ def get_promo_lift(department: str) -> str:
     )
 
 @tool
-def get_top_departments() -> str:
+def list_departments() -> str:
     """List all CPG departments available in the dataset."""
     result = spark.sql("""
         SELECT DISTINCT DEPARTMENT
@@ -95,7 +95,7 @@ def get_weekly_promo_trend(department: str) -> str:
 # COMMAND ----------
 llm = ChatDatabricks(endpoint="databricks-meta-llama-3-3-70b-instruct")
 
-tools = [get_top_departments, get_promo_lift, get_weekly_promo_trend]
+tools = [list_departments, get_promo_lift, get_weekly_promo_trend]
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", """You are a CPG commercial analytics agent for companies like Pepsi and P&G.

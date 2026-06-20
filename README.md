@@ -128,7 +128,7 @@ There are two Databricks notebooks. You run them in order.
    - Builds a **tool-calling LangChain agent** powered by a Databricks-hosted LLM
      (`databricks-meta-llama-3-3-70b-instruct` via `ChatDatabricks`).
    - Exposes three tools, each a governed Spark SQL query over the Delta tables:
-     - `get_top_departments()` — list available CPG departments
+     - `list_departments()` — list available CPG departments
      - `get_promo_lift(department)` — promo avg sale vs. baseline avg sale + % lift
      - `get_weekly_promo_trend(department)` — week-over-week sales, flagged by promo
    - Wraps everything in **MLflow autolog** (`mlflow.langchain.autolog()`), so each
@@ -162,7 +162,7 @@ Kaggle (Dunnhumby)
 Delta tables  ──  databricks_cpg.cpg_demo.{transactions, causal, products}
       │              (governed by Unity Catalog)
       ▼
-@tool functions (Spark SQL)  ──  get_top_departments / get_promo_lift / get_weekly_promo_trend
+@tool functions (Spark SQL)  ──  list_departments / get_promo_lift / get_weekly_promo_trend
       │
       ▼
 LangChain tool-calling agent  +  ChatDatabricks (Llama 3.3 70B)
@@ -192,7 +192,7 @@ Where should Pepsi focus trade spend next quarter?
 ```
 > Entering new AgentExecutor chain...
 
-Invoking: `get_top_departments` with `{}`
+Invoking: `list_departments` with `{}`
 GROCERY, DRUG GM, PRODUCE, MEAT, DELI, NUTRITION, PASTRY, SEAFOOD, FLORAL, ...
 
 Invoking: `get_promo_lift` with `{'department': 'GROCERY'}`
