@@ -25,8 +25,8 @@ def get_promo_lift(department: str) -> str:
     result = spark.sql(f"""
         SELECT
             p.DEPARTMENT,
-            AVG(CASE WHEN c.display != '0' OR c.mailer != '0' THEN t.SALES_VALUE END) AS promo_sales,
-            AVG(CASE WHEN c.display = '0' AND c.mailer = '0' THEN t.SALES_VALUE END)  AS base_sales
+            AVG(CASE WHEN COALESCE(c.display, '0') != '0' OR COALESCE(c.mailer, '0') != '0' THEN t.SALES_VALUE END) AS promo_sales,
+            AVG(CASE WHEN COALESCE(c.display, '0')  = '0' AND COALESCE(c.mailer, '0')  = '0' THEN t.SALES_VALUE END) AS base_sales
         FROM databricks_cpg.cpg_demo.transactions t
         JOIN databricks_cpg.cpg_demo.products p
           ON t.PRODUCT_ID = p.PRODUCT_ID
