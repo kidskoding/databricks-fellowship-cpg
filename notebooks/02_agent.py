@@ -23,7 +23,7 @@ mlflow.langchain.autolog()
 @tool
 def get_promo_lift(department: str) -> str:
     """Get promotion sales lift vs baseline for a CPG department."""
-    result = spark.sql(f"""
+    result = spark.sql("""
         SELECT
             p.DEPARTMENT,
             AVG(CASE WHEN COALESCE(c.display, '0') != '0' OR COALESCE(c.mailer, '0') != '0' THEN t.SALES_VALUE END) AS promo_sales,
@@ -33,9 +33,9 @@ def get_promo_lift(department: str) -> str:
           ON t.PRODUCT_ID = p.PRODUCT_ID
         LEFT JOIN databricks_cpg.cpg_demo.causal c
           ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO AND t.STORE_ID = c.STORE_ID
-        WHERE UPPER(p.DEPARTMENT) = UPPER('{department}')
+        WHERE UPPER(p.DEPARTMENT) = UPPER(:department)
         GROUP BY p.DEPARTMENT
-    """).toPandas()
+    """, args={"department": department}).toPandas()
 
     if result.empty:
         return f"No data for department: {department}"
@@ -68,7 +68,7 @@ def get_top_departments() -> str:
 @tool
 def get_weekly_promo_trend(department: str) -> str:
     """Week-over-week total sales for a department, with the share of each week's sales that were on promotion."""
-    result = spark.sql(f"""
+    result = spark.sql("""
         SELECT
             t.WEEK_NO,
             SUM(t.SALES_VALUE) AS total_sales,
@@ -77,10 +77,10 @@ def get_weekly_promo_trend(department: str) -> str:
         FROM databricks_cpg.cpg_demo.transactions t
         JOIN databricks_cpg.cpg_demo.products p ON t.PRODUCT_ID = p.PRODUCT_ID
         LEFT JOIN databricks_cpg.cpg_demo.causal c ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO AND t.STORE_ID = c.STORE_ID
-        WHERE UPPER(p.DEPARTMENT) = UPPER('{department}')
+        WHERE UPPER(p.DEPARTMENT) = UPPER(:department)
         GROUP BY t.WEEK_NO
         ORDER BY t.WEEK_NO
-    """).toPandas()
+    """, args={"department": department}).toPandas()
 
     if result.empty:
         return f"No trend data for: {department}"
