@@ -173,6 +173,62 @@ MLflow trace  ──  experiment /cpg-promo-agent  (full reasoning + tool calls 
 
 ---
 
+## Sample agent output
+
+Running the final cell of `02_agent.py` with `verbose=True` produces a trace like
+the one below. The agent picks tools on its own, runs governed Spark SQL, and ends
+with specific numbers plus a concrete recommendation. *(Illustrative — exact
+figures depend on the dataset and model run.)*
+
+**Input**
+
+```
+Which CPG departments have the highest promotion lift?
+Where should Pepsi focus trade spend next quarter?
+```
+
+**Agent trace** (`AgentExecutor`, verbose)
+
+```
+> Entering new AgentExecutor chain...
+
+Invoking: `get_top_departments` with `{}`
+GROCERY, DRUG GM, PRODUCE, MEAT, DELI, NUTRITION, PASTRY, SEAFOOD, FLORAL, ...
+
+Invoking: `get_promo_lift` with `{'department': 'GROCERY'}`
+Department: GROCERY | Base avg sale: $2.84 | Promo avg sale: $3.61 | Lift: 27.1%
+
+Invoking: `get_promo_lift` with `{'department': 'NUTRITION'}`
+Department: NUTRITION | Base avg sale: $4.12 | Promo avg sale: $4.55 | Lift: 10.4%
+
+Invoking: `get_weekly_promo_trend` with `{'department': 'GROCERY'}`
+Wk1: $48210 | Wk2 [PROMO]: $61740 | Wk3 [PROMO]: $59880 | Wk4: $47990 | ...
+
+> Finished chain.
+```
+
+**Final answer**
+
+```
+Based on the data, GROCERY shows the strongest promotion lift at 27.1%
+(base avg sale $2.84 → promo avg sale $3.61), and weekly trends confirm
+sales jump ~28% in promo weeks. NUTRITION lifts far less (10.4%),
+suggesting much of its promo spend subsidizes sales that would happen anyway.
+
+Recommendation: Pepsi should concentrate next quarter's incremental trade
+spend on GROCERY-department promotions (displays + mailers), where each
+dollar of discount drives the most incremental sales, and pull back spend
+on low-lift departments like NUTRITION. Next step: run get_weekly_promo_trend
+on the top 3 departments to identify the specific weeks with the best
+lift-to-spend ratio before locking the promo calendar.
+```
+
+Every step above — the tool calls, the SQL results, the reasoning, and the final
+answer — is captured in the MLflow experiment `/cpg-promo-agent`, so the
+recommendation is fully auditable.
+
+---
+
 ## Running it
 
 These notebooks are meant to run **inside an Azure Databricks workspace**, not
