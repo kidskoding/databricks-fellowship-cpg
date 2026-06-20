@@ -8,6 +8,7 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 import mlflow
+import pandas as pd
 from databricks_langchain import ChatDatabricks
 from langchain_core.tools import tool
 from langchain.agents import AgentExecutor, create_tool_calling_agent
@@ -22,34 +23,39 @@ mlflow.langchain.autolog()
 @tool
 def get_promo_lift(department: str) -> str:
     """Get promotion sales lift vs baseline for a CPG department."""
-    result = spark.sql(f"""
+    result = spark.sql("""
         SELECT
             p.DEPARTMENT,
-            AVG(CASE WHEN c.display != '0' OR c.mailer != '0' THEN t.SALES_VALUE END) AS promo_sales,
-            AVG(CASE WHEN c.display = '0' AND c.mailer = '0' THEN t.SALES_VALUE END)  AS base_sales
+            AVG(CASE WHEN COALESCE(c.display, '0') != '0' OR COALESCE(c.mailer, '0') != '0' THEN t.SALES_VALUE END) AS promo_sales,
+            AVG(CASE WHEN COALESCE(c.display, '0')  = '0' AND COALESCE(c.mailer, '0')  = '0' THEN t.SALES_VALUE END) AS base_sales
         FROM databricks_cpg.cpg_demo.transactions t
         JOIN databricks_cpg.cpg_demo.products p
           ON t.PRODUCT_ID = p.PRODUCT_ID
         LEFT JOIN databricks_cpg.cpg_demo.causal c
-          ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO
-        WHERE UPPER(p.DEPARTMENT) = UPPER('{department}')
+          ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO AND t.STORE_ID = c.STORE_ID
+        WHERE UPPER(p.DEPARTMENT) = UPPER(:department)
         GROUP BY p.DEPARTMENT
-    """).toPandas()
+    """, args={"department": department}).toPandas()
 
     if result.empty:
         return f"No data for department: {department}"
 
     row = result.iloc[0]
-    lift = ((row["promo_sales"] - row["base_sales"]) / row["base_sales"] * 100) if row["base_sales"] else 0
+    promo, base = row["promo_sales"], row["base_sales"]
+    if pd.isna(base) or base == 0:
+        return f"Department: {row['DEPARTMENT']} | No non-promo baseline sales — lift undefined."
+    if pd.isna(promo):
+        return f"Department: {row['DEPARTMENT']} | No on-promo sales — lift undefined."
+    lift = (promo - base) / base * 100
     return (
         f"Department: {row['DEPARTMENT']} | "
-        f"Base avg sale: ${row['base_sales']:.2f} | "
-        f"Promo avg sale: ${row['promo_sales']:.2f} | "
+        f"Base avg sale: ${base:.2f} | "
+        f"Promo avg sale: ${promo:.2f} | "
         f"Lift: {lift:.1f}%"
     )
 
 @tool
-def get_top_departments() -> str:
+def list_departments() -> str:
     """List all CPG departments available in the dataset."""
     result = spark.sql("""
         SELECT DISTINCT DEPARTMENT
@@ -61,31 +67,35 @@ def get_top_departments() -> str:
 
 @tool
 def get_weekly_promo_trend(department: str) -> str:
-    """Get week-over-week sales trend during promotion periods for a department."""
-    result = spark.sql(f"""
+    """Week-over-week total sales for a department, with the share of each week's sales that were on promotion."""
+    result = spark.sql("""
         SELECT
             t.WEEK_NO,
             SUM(t.SALES_VALUE) AS total_sales,
-            MAX(CASE WHEN c.display != '0' OR c.mailer != '0' THEN 1 ELSE 0 END) AS on_promo
+            SUM(CASE WHEN COALESCE(c.display, '0') != '0' OR COALESCE(c.mailer, '0') != '0'
+                     THEN t.SALES_VALUE ELSE 0 END) AS promo_sales
         FROM databricks_cpg.cpg_demo.transactions t
         JOIN databricks_cpg.cpg_demo.products p ON t.PRODUCT_ID = p.PRODUCT_ID
-        LEFT JOIN databricks_cpg.cpg_demo.causal c ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO
-        WHERE UPPER(p.DEPARTMENT) = UPPER('{department}')
+        LEFT JOIN databricks_cpg.cpg_demo.causal c ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO AND t.STORE_ID = c.STORE_ID
+        WHERE UPPER(p.DEPARTMENT) = UPPER(:department)
         GROUP BY t.WEEK_NO
         ORDER BY t.WEEK_NO
-        LIMIT 10
-    """).toPandas()
+    """, args={"department": department}).toPandas()
 
     if result.empty:
         return f"No trend data for: {department}"
 
-    rows = result.to_dict("records")
-    return " | ".join([f"Wk{r['WEEK_NO']} {'[PROMO]' if r['on_promo'] else ''}: ${r['total_sales']:.0f}" for r in rows])
+    def fmt(r):
+        share = (r["promo_sales"] / r["total_sales"] * 100) if r["total_sales"] else 0
+        tag = f" (promo {share:.0f}%)" if share > 0 else ""
+        return f"Wk{r['WEEK_NO']}{tag}: ${r['total_sales']:.0f}"
+
+    return " | ".join(fmt(r) for r in result.to_dict("records"))
 
 # COMMAND ----------
 llm = ChatDatabricks(endpoint="databricks-meta-llama-3-3-70b-instruct")
 
-tools = [get_top_departments, get_promo_lift, get_weekly_promo_trend]
+tools = [list_departments, get_promo_lift, get_weekly_promo_trend]
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", """You are a CPG commercial analytics agent for companies like Pepsi and P&G.
