@@ -31,7 +31,7 @@ def get_promo_lift(department: str) -> str:
         JOIN databricks_cpg.cpg_demo.products p
           ON t.PRODUCT_ID = p.PRODUCT_ID
         LEFT JOIN databricks_cpg.cpg_demo.causal c
-          ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO
+          ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO AND t.STORE_ID = c.STORE_ID
         WHERE UPPER(p.DEPARTMENT) = UPPER('{department}')
         GROUP BY p.DEPARTMENT
     """).toPandas()
@@ -69,7 +69,7 @@ def get_weekly_promo_trend(department: str) -> str:
             MAX(CASE WHEN c.display != '0' OR c.mailer != '0' THEN 1 ELSE 0 END) AS on_promo
         FROM databricks_cpg.cpg_demo.transactions t
         JOIN databricks_cpg.cpg_demo.products p ON t.PRODUCT_ID = p.PRODUCT_ID
-        LEFT JOIN databricks_cpg.cpg_demo.causal c ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO
+        LEFT JOIN databricks_cpg.cpg_demo.causal c ON t.PRODUCT_ID = c.PRODUCT_ID AND t.WEEK_NO = c.WEEK_NO AND t.STORE_ID = c.STORE_ID
         WHERE UPPER(p.DEPARTMENT) = UPPER('{department}')
         GROUP BY t.WEEK_NO
         ORDER BY t.WEEK_NO
