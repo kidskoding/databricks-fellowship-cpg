@@ -1,7 +1,7 @@
 [project]
 name = "cpg"
 version = "0.1.0"
-description = "Add your description here"
+description = "Mosaic AI agent on Azure Databricks for CPG trade promotion analytics via Unity Catalog, MLflow tracing, Delta tables"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
