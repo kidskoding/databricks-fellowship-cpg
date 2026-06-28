@@ -252,14 +252,37 @@ Databricks model serving endpoints.
 
 ---
 
+## Serve it with a UI (Model Serving + Review App)
+
+`02_agent.py` runs the agent interactively in a notebook. To get a chat UI,
+deploy it as a Mosaic AI agent — the deploy step creates a serving endpoint
+**and** a Review App / AI Playground chat interface, with MLflow tracing on.
+
+Serving endpoints have no Spark session, so the tools are exposed as
+**Unity Catalog SQL functions** instead of `spark.sql`:
+
+1. Run `notebooks/03_register_tools.py` to create the three UC functions
+   (`list_departments`, `get_promo_lift`, `get_weekly_promo_trend`) in
+   `databricks_cpg.cpg_demo`.
+2. `notebooks/agent.py` is the servable agent (an MLflow `ChatAgent` that
+   calls those UC functions via the UC function toolkit).
+3. Run `notebooks/04_deploy.py` to log the agent, register it to Unity
+   Catalog, and `agents.deploy(...)` it. The printed query endpoint and the
+   Review App (linked on the endpoint's page) are your UI.
+
+Needs `mlflow>=3.1.3` and `databricks-agents>=1.1.0`.
+
 ## Repo layout
 
 ```
 .
 ├── notebooks/
-│   ├── 01_setup.py     # download dataset → Delta tables in Unity Catalog
-│   └── 02_agent.py     # LangChain tool-calling agent + MLflow tracing
-├── pyproject.toml      # local dev deps (uv) — mainly kagglehub
+│   ├── 01_setup.py            # download dataset → Delta tables in Unity Catalog
+│   ├── 02_agent.py            # LangChain tool-calling agent + MLflow tracing (interactive)
+│   ├── 03_register_tools.py   # create the 3 tools as governed Unity Catalog SQL functions
+│   ├── agent.py               # servable MLflow ChatAgent (calls the UC functions)
+│   └── 04_deploy.py           # log → register to UC → deploy (serving endpoint + Review App)
+├── pyproject.toml             # local dev deps (uv) — mainly kagglehub
 ├── uv.lock
 └── README.md
 ```
