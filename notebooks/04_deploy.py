@@ -8,7 +8,7 @@
 # MAGIC with MLflow tracing on. Run `03_register_tools.py` first.
 
 # COMMAND ----------
-# MAGIC %pip install -U "mlflow>=3.1.3" "databricks-agents>=1.1.0" databricks-langchain "unitycatalog-ai[databricks]" langchain
+# MAGIC %pip install mlflow==3.18.0 databricks-agents==1.13.0 databricks-langchain==0.22.0 "unitycatalog-ai[databricks]==0.4.1" langchain==1.5.0 langgraph==1.2.21
 
 # COMMAND ----------
 dbutils.library.restartPython()
@@ -53,7 +53,7 @@ with mlflow.start_run():
         python_model="agent.py",      # path is relative to this driver notebook
         input_example=input_example,
         resources=resources,
-        pip_requirements=["mlflow>=3.1.3", "databricks-langchain", "unitycatalog-ai[databricks]", "langchain"],
+        pip_requirements=["mlflow==3.18.0", "databricks-langchain==0.22.0", "unitycatalog-ai[databricks]==0.4.1", "langchain==1.5.0", "langgraph==1.2.21"],
     )
 
 print("Model URI:", logged.model_uri)
@@ -66,7 +66,7 @@ print("Registered:", UC_MODEL, "version", uc_info.version)
 # COMMAND ----------
 from databricks import agents
 
-deployment = agents.deploy(UC_MODEL, uc_info.version, scale_to_zero_enabled=True)
+deployment = agents.deploy(UC_MODEL, uc_info.version, scale_to_zero=True)
 print("Query endpoint:", deployment.query_endpoint)
 # The Review App / AI Playground chat UI link is shown on the endpoint's page
 # in Serving, and via: from databricks.agents import list_deployments; list_deployments()

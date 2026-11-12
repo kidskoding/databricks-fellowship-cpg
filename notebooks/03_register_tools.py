@@ -17,7 +17,7 @@ COMMENT 'List all CPG departments available in the dataset, comma-separated and 
 RETURN
   SELECT CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(DEPARTMENT)))
   FROM databricks_cpg.cpg_demo.products
-  WHERE DEPARTMENT IS NOT NULL
+  WHERE TRIM(DEPARTMENT) != ''
 """)
 
 # COMMAND ----------

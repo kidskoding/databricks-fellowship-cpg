@@ -1,7 +1,7 @@
 # Databricks notebook source
 
 # COMMAND ----------
-# MAGIC %pip install databricks-langchain mlflow langchain langgraph
+# MAGIC %pip install mlflow==3.18.0 databricks-langchain==0.22.0 langchain==1.5.0 langgraph==1.2.21
 
 # COMMAND ----------
 dbutils.library.restartPython()
@@ -11,8 +11,7 @@ import mlflow
 import pandas as pd
 from databricks_langchain import ChatDatabricks
 from langchain_core.tools import tool
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_core.prompts import ChatPromptTemplate
+from langchain.agents import create_agent
 
 mlflow.langchain.autolog()
 
@@ -60,7 +59,7 @@ def list_departments() -> str:
     result = spark.sql("""
         SELECT DISTINCT DEPARTMENT
         FROM databricks_cpg.cpg_demo.products
-        WHERE DEPARTMENT IS NOT NULL
+        WHERE TRIM(DEPARTMENT) != ''
         ORDER BY DEPARTMENT
     """).toPandas()
     return ", ".join(result["DEPARTMENT"].tolist())
@@ -97,24 +96,20 @@ llm = ChatDatabricks(endpoint="databricks-meta-llama-3-3-70b-instruct")
 
 tools = [list_departments, get_promo_lift, get_weekly_promo_trend]
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a CPG commercial analytics agent for companies like Pepsi and P&G.
+SYSTEM_PROMPT = """You are a CPG commercial analytics agent for companies like Pepsi and P&G.
 You have access to real retail transaction and promotion data governed by Unity Catalog.
 Use tools to answer questions about promotion performance, trade spend effectiveness, and sales trends.
-Always give specific numbers. Always recommend a concrete next action."""),
-    ("human", "{input}"),
-    ("placeholder", "{agent_scratchpad}"),
-])
+Always give specific numbers. Always recommend a concrete next action."""
 
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+agent = create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
 
 # COMMAND ----------
 # Every run logged in MLflow — full reasoning trace, inputs, outputs, tool calls
-mlflow.set_experiment("/cpg-promo-agent")
+mlflow.set_experiment("/Users/" + spark.sql("SELECT current_user()").collect()[0][0] + "/cpg-promo-agent")
 
 with mlflow.start_run(run_name="promo_lift_analysis"):
-    response = agent_executor.invoke({
-        "input": "Which CPG departments have the highest promotion lift? Where should Pepsi focus trade spend next quarter?"
-    })
-    print(response["output"])
+    response = agent.invoke({"messages": [{
+        "role": "user",
+        "content": "Which CPG departments have the highest promotion lift? Where should Pepsi focus trade spend next quarter?",
+    }]})
+    print(response["messages"][-1].content)
