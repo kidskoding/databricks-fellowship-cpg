@@ -1,0 +1,13 @@
+bundle:
+  name: cpg-promo-agent
+
+include:
+  - resources/*.yml
+
+targets:
+  prod:
+    default: true
+    mode: production
+    workspace:
+      host: https://dbc-d90bc1c7-d6e2.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

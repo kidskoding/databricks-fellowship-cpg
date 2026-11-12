@@ -1,0 +1,25 @@
+resources:
+  jobs:
+    cpg_pipeline:
+      name: cpg-promo-agent-pipeline
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/01_setup.py
+          environment_key: default
+        - task_key: register_tools
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/03_register_tools.py
+          environment_key: default
+        - task_key: deploy_agent
+          depends_on:
+            - task_key: register_tools
+          notebook_task:
+            notebook_path: ../notebooks/04_deploy.py
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "4"

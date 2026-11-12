@@ -1,0 +1,23 @@
+name: Deploy to Databricks
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency: databricks-prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle validate --strict -t prod
+      - run: databricks bundle deploy -t prod
+      # Data load (setup) is slow and rarely changes; CI re-registers the tools and redeploys the agent.
+      # Run the full pipeline (including setup) manually with: databricks bundle run cpg_pipeline -t prod
+      - run: databricks bundle run cpg_pipeline -t prod --only register_tools,deploy_agent
