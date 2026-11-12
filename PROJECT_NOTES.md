@@ -72,6 +72,8 @@ to choosing what to look up and narrating verified results.
 | `notebooks/03_register_tools.py` | The 3 tools as governed Unity Catalog SQL functions (for serving) |
 | `notebooks/agent.py` | The servable MLflow ChatAgent (calls the UC functions) |
 | `notebooks/04_deploy.py` | Logs → registers to UC → deploys (serving endpoint + chat UI) |
+| `databricks.yml`, `resources/cpg_pipeline.job.yml` | Bundle: one job running setup → register_tools → deploy_agent |
+| `.github/workflows/deploy.yml` | CI/CD: bundle validate → deploy → run on push to master |
 
 ---
 
@@ -99,7 +101,7 @@ One commit each:
 | 5 | SQL injection | The department string was pasted straight into the query |
 | 6 | `get_top_departments` misnomer | It ranks nothing — renamed to `list_departments` |
 
-### Step 4 — Built serving + chat UI (PR #2, open)
+### Step 4 — Built serving + chat UI (PR #2, merged)
 Goal: a UI. Chose to deploy natively on Databricks Model Serving, which provides a
 built-in chat interface (AI Playground / Review App).
 
@@ -116,13 +118,40 @@ How the served version works end to end:
 
 ---
 
+### Step 5 — First real run on Databricks + CI/CD
+Ran the whole pipeline on the workspace (serverless only, no cluster). The first
+real run surfaced five breaks, each fixed:
+
+| # | Break | Fix |
+| --- | --- | --- |
+| 1 | Serverless can't read driver-local `file://` paths | `01_setup.py` stages CSVs in UC volume `databricks_cpg.cpg_demo.raw` |
+| 2 | LangChain 1.x removed `AgentExecutor` | Both agents use `langchain.agents.create_agent` |
+| 3 | Unpinned `%pip install -U` hung 20+ min in pip backtracking | Exact version pins in every notebook + `log_model` |
+| 4 | UC toolkit marks `department` optional; Llama sometimes omits it and the exception killed the request | Middleware hands tool errors back to the LLM so it retries |
+| 5 | `agents.deploy(scale_to_zero_enabled=True)` silently ignored | Correct kwarg is `scale_to_zero=True` |
+
+Also: blank `" "` department filtered out of `list_departments`; catalog is
+created via SQL (the REST API needs a storage location on Default Storage
+workspaces).
+
+CI/CD added: a Databricks Asset Bundle (`databricks.yml` +
+`resources/cpg_pipeline.job.yml`) defines the job `setup → register_tools →
+deploy_agent`; a GitHub Actions workflow validates, deploys and re-runs
+`register_tools,deploy_agent` on every push to `master`.
+
+---
+
 ## 5. Current state and honest caveats
 
-- **On master (PR #1):** corrected analytics.
-- **Open (PR #2):** serving + UI — syntax-checked but not yet run on Databricks.
-  First real deploy is the true test. Three spots may need a tweak: the
-  `UCFunctionToolkit` import path, `log_model(name=...)` vs `artifact_path=`
-  (MLflow 3 vs 2), and the UC function execution backend (serverless vs warehouse).
+- **Running:** tables loaded (2.6M transactions, 36.8M causal rows, 92K
+  products), UC functions live, agent registered in UC and served on endpoint
+  `agents_databricks_cpg-cpg_demo-cpg_promo_agent` with a Review App chat UI.
+- **CI needs two GitHub secrets** (`DATABRICKS_HOST`, `DATABRICKS_TOKEN`) before
+  the workflow can deploy.
+- **Real numbers differ from the old README sample:** GROCERY lift is -6.1%,
+  SPIRITS +36.7%. The old sample (+27.1% GROCERY) was illustrative, not real.
+- **Agent reasoning is shallow:** it may call a department "highest" after
+  checking two. The numbers are real; the ranking claim is the LLM's.
 - **Known limitation left in place:** "lift" is still average sale value per line,
   not true incremental volume. Fixing it is a redesign (needs quantity + a causal
   model), not a bug fix.

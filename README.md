@@ -13,24 +13,34 @@ tables, reasons over the numbers, and gives a concrete recommendation.
 
 ## Quickstart
 
-> Runs **inside an Azure Databricks workspace** (needs Unity Catalog + the
+> Runs **inside a Databricks workspace** (needs Unity Catalog + the
 > `databricks-meta-llama-3-3-70b-instruct` serving endpoint). It is not a local app.
+> Tested on serverless compute.
 
-1. **Import** `notebooks/01_setup.py` and `notebooks/02_agent.py` into your
-   workspace (Databricks notebook source format).
-2. **Setup** — run `01_setup.py` top to bottom. It downloads the Dunnhumby
-   dataset from Kaggle and writes three Delta tables into
-   `databricks_cpg.cpg_demo`. The final `SHOW TABLES` cell should list
-   `transactions`, `causal`, `products`.
-3. **Run the agent** — run `02_agent.py`. The last cell asks a sample question and
-   prints the answer inline; the full reasoning trace lands in the MLflow
-   experiment `/cpg-promo-agent`.
-4. **Ask your own** — edit the `"input"` string in the final cell, e.g.
-   *"What's the promo lift for the GROCERY department?"*
+**One command (Declarative Automation Bundle):**
 
-> Using a different catalog? Replace `databricks_cpg` everywhere in both notebooks.
-> Local-only? See [Local dev](#local-dev-optional) — only the dataset is
-> reproducible locally; the agent needs Databricks.
+```bash
+databricks bundle deploy -t prod
+databricks bundle run cpg_pipeline -t prod   # load data → register tools → deploy agent + chat UI
+```
+
+Edit `workspace.host` in `databricks.yml` to point at your workspace.
+
+**Or by hand, notebook by notebook:**
+
+1. **Setup** — run `notebooks/01_setup.py`. It creates `databricks_cpg.cpg_demo`,
+   stages the Dunnhumby CSVs in the volume `databricks_cpg.cpg_demo.raw`
+   (downloading from Kaggle if they aren't there yet), and writes three Delta
+   tables: `transactions`, `causal`, `products`.
+2. **Run the agent** — run `notebooks/02_agent.py`. The last cell asks a sample
+   question and prints the answer; the full trace lands in the MLflow experiment
+   `/Users/<you>/cpg-promo-agent`.
+3. **Serve it** — run `03_register_tools.py` then `04_deploy.py` (see
+   [Serve it with a UI](#serve-it-with-a-ui-model-serving--review-app)).
+
+> Using a different catalog? Replace `databricks_cpg` everywhere in the notebooks.
+> No internet egress on your compute? Upload the 3 CSVs to the volume yourself:
+> `databricks fs cp transaction_data.csv dbfs:/Volumes/databricks_cpg/cpg_demo/raw/`.
 
 ---
 
@@ -113,11 +123,11 @@ seconds, and trust it because every step is governed and traceable.
 
 ## What this project actually does
 
-There are two Databricks notebooks. You run them in order.
+The core is two Databricks notebooks, run in order. Notebooks 03/04 serve the agent (see below).
 
 1. **`notebooks/01_setup.py`** — Data ingestion
-   - Downloads the [Dunnhumby "The Complete Journey"](https://www.kaggle.com/datasets/frtgnn/dunnhumby-the-complete-journey)
-     retail dataset from Kaggle (via `kagglehub`).
+   - Stages the [Dunnhumby "The Complete Journey"](https://www.kaggle.com/datasets/frtgnn/dunnhumby-the-complete-journey)
+     retail dataset in a Unity Catalog volume (downloads it via `kagglehub` if missing).
    - Writes three CSVs into **Delta tables** under the Unity Catalog schema
      `databricks_cpg.cpg_demo`:
      - `transactions` — line-item sales (household, product, week, sales value)
@@ -125,15 +135,15 @@ There are two Databricks notebooks. You run them in order.
      - `products` — product → department/commodity hierarchy
 
 2. **`notebooks/02_agent.py`** — The agent
-   - Builds a **tool-calling LangChain agent** powered by a Databricks-hosted LLM
+   - Builds a **tool-calling LangChain agent** (`langchain.agents.create_agent`) powered by a Databricks-hosted LLM
      (`databricks-meta-llama-3-3-70b-instruct` via `ChatDatabricks`).
    - Exposes three tools, each a governed Spark SQL query over the Delta tables:
      - `list_departments()` — list available CPG departments
      - `get_promo_lift(department)` — promo avg sale vs. baseline avg sale + % lift
-     - `get_weekly_promo_trend(department)` — week-over-week sales, flagged by promo
+     - `get_weekly_promo_trend(department)` — week-over-week sales with each week's promo share
    - Wraps everything in **MLflow autolog** (`mlflow.langchain.autolog()`), so each
      run captures the full reasoning trace, tool calls, inputs, and outputs under
-     the experiment `/cpg-promo-agent`. No black box.
+     the experiment `/Users/<you>/cpg-promo-agent`. No black box.
 
 ---
 
@@ -157,7 +167,7 @@ whether trade-promotion spend (displays, mailers) actually lifts sales.
 
 ```
 Kaggle (Dunnhumby)
-      │  01_setup.py (kagglehub download)
+      │  01_setup.py (kagglehub → UC volume)
       ▼
 Delta tables  ──  databricks_cpg.cpg_demo.{transactions, causal, products}
       │              (governed by Unity Catalog)
@@ -165,20 +175,19 @@ Delta tables  ──  databricks_cpg.cpg_demo.{transactions, causal, products}
 @tool functions (Spark SQL)  ──  list_departments / get_promo_lift / get_weekly_promo_trend
       │
       ▼
-LangChain tool-calling agent  +  ChatDatabricks (Llama 3.3 70B)
+LangChain create_agent  +  ChatDatabricks (Llama 3.3 70B)
       │
       ▼
-MLflow trace  ──  experiment /cpg-promo-agent  (full reasoning + tool calls logged)
+MLflow trace  ──  experiment /Users/<you>/cpg-promo-agent  (full reasoning + tool calls logged)
 ```
 
 ---
 
 ## Sample agent output
 
-Running the final cell of `02_agent.py` with `verbose=True` produces a trace like
-the one below. The agent picks tools on its own, runs governed Spark SQL, and ends
-with specific numbers plus a concrete recommendation. *(Illustrative — exact
-figures depend on the dataset and model run.)*
+A real run of `02_agent.py` (serverless, Llama 3.3 70B, Nov 2026). The trace below
+is read back from MLflow: the agent picks tools on its own, recovers from a bad
+guess, and grounds its answer in governed SQL.
 
 **Input**
 
@@ -187,68 +196,47 @@ Which CPG departments have the highest promotion lift?
 Where should Pepsi focus trade spend next quarter?
 ```
 
-**Agent trace** (`AgentExecutor`, verbose)
+**Tool calls** (from the MLflow trace, 28 s end to end)
 
 ```
-> Entering new AgentExecutor chain...
-
-Invoking: `list_departments` with `{}`
-GROCERY, DRUG GM, PRODUCE, MEAT, DELI, NUTRITION, PASTRY, SEAFOOD, FLORAL, ...
-
-Invoking: `get_promo_lift` with `{'department': 'GROCERY'}`
-Department: GROCERY | Base avg sale: $2.84 | Promo avg sale: $3.61 | Lift: 27.1%
-
-Invoking: `get_promo_lift` with `{'department': 'NUTRITION'}`
-Department: NUTRITION | Base avg sale: $4.12 | Promo avg sale: $4.55 | Lift: 10.4%
-
-Invoking: `get_weekly_promo_trend` with `{'department': 'GROCERY'}`
-Wk1: $48210 | Wk2 [PROMO]: $61740 | Wk3 [PROMO]: $59880 | Wk4: $47990 | ...
-
-> Finished chain.
+get_promo_lift({'department': 'Beverages'})  -> No data for department: Beverages
+list_departments()                            -> AUTOMOTIVE, CHARITABLE CONT, CHEF SHOPPE, ... GROCERY, ... SPIRITS, ...
+get_promo_lift({'department': 'GROCERY'})     -> Department: GROCERY | Base avg sale: $2.52 | Promo avg sale: $2.37 | Lift: -6.1%
+get_promo_lift({'department': 'SPIRITS'})     -> Department: SPIRITS | Base avg sale: $10.10 | Promo avg sale: $13.80 | Lift: 36.7%
 ```
 
 **Final answer**
 
 ```
-Based on the data, GROCERY shows the strongest promotion lift at 27.1%
-(base avg sale $2.84 → promo avg sale $3.61), and weekly trends confirm
-sales jump ~28% in promo weeks. NUTRITION lifts far less (10.4%),
-suggesting much of its promo spend subsidizes sales that would happen anyway.
-
-Recommendation: Pepsi should concentrate next quarter's incremental trade
-spend on GROCERY-department promotions (displays + mailers), where each
-dollar of discount drives the most incremental sales, and pull back spend
-on low-lift departments like NUTRITION. Next step: run get_weekly_promo_trend
-on the top 3 departments to identify the specific weeks with the best
-lift-to-spend ratio before locking the promo calendar.
+Based on the promotion lift data, Pepsi should focus trade spend on the SPIRITS
+department next quarter, as it has the highest promotion lift of 36.7%. This
+indicates that promotional activities in the SPIRITS department are effective
+in increasing sales.
 ```
 
-Every step above — the tool calls, the SQL results, the reasoning, and the final
-answer — is captured in the MLflow experiment `/cpg-promo-agent`, so the
-recommendation is fully auditable.
+Note the agent compared only two departments before calling SPIRITS "the
+highest" — the numbers are real, but the ranking claim is the LLM's. The trace
+makes that visible, which is the point of tracing.
 
 ---
 
 ## Running it
 
-These notebooks are meant to run **inside an Azure Databricks workspace**, not
-locally. They rely on Databricks runtime globals (`spark`, `dbutils`) and
-Databricks model serving endpoints.
+These notebooks run **inside a Databricks workspace**, not locally. They rely on
+Databricks runtime globals (`spark`, `dbutils`) and Databricks model serving
+endpoints. They work on serverless compute (no cluster needed).
 
 ### Prerequisites
-- An Azure Databricks workspace with **Unity Catalog** enabled.
-- A catalog named `databricks_cpg` (or edit the notebooks to match yours).
+- A Databricks workspace with **Unity Catalog** enabled.
+- Permission to create the catalog `databricks_cpg` (or edit the notebooks to use yours).
 - Access to the `databricks-meta-llama-3-3-70b-instruct` serving endpoint.
-- Kaggle credentials configured for `kagglehub` (the dataset is public).
 
-### Steps
-1. Import both files in `notebooks/` into your workspace (they're in Databricks
-   `# COMMAND ----------` notebook source format).
-2. Run **`01_setup.py`** top to bottom on a cluster. Confirm the three tables
-   appear via the final `SHOW TABLES` cell.
-3. Run **`02_agent.py`**. The last cell invokes the agent with a sample question;
-   the answer prints inline and the full trace lands in the MLflow experiment.
-4. Ask your own questions by changing the `"input"` string in the final cell.
+### Package versions
+Notebooks pin exact versions (`mlflow==3.18.0`, `langchain==1.5.0`,
+`langgraph==1.2.21`, `databricks-langchain==0.22.0`, `databricks-agents==1.13.0`,
+`unitycatalog-ai==0.4.1`). Unpinned `%pip install -U` sent pip into resolver
+backtracking for 20+ minutes on serverless; LangChain 1.x also removed
+`AgentExecutor`, which the agent no longer uses.
 
 ---
 
@@ -270,7 +258,22 @@ Serving endpoints have no Spark session, so the tools are exposed as
    Catalog, and `agents.deploy(...)` it. The printed query endpoint and the
    Review App (linked on the endpoint's page) are your UI.
 
-Needs `mlflow>=3.1.3` and `databricks-agents>=1.1.0`.
+## CI/CD (GitHub Actions + bundle)
+
+`databricks.yml` + `resources/cpg_pipeline.job.yml` define one job,
+`cpg-promo-agent-pipeline`: `setup → register_tools → deploy_agent`, all on
+serverless.
+
+`.github/workflows/deploy.yml` runs on every push to `master` (or by hand):
+
+1. `databricks bundle validate --strict -t prod`
+2. `databricks bundle deploy -t prod` — syncs the notebooks + job definition
+3. `databricks bundle run cpg_pipeline -t prod --only register_tools,deploy_agent`
+   — re-creates the UC functions and redeploys the agent. The slow data load
+   (`setup`) is skipped; run the full job by hand when the data changes.
+
+Add two repo secrets: `DATABRICKS_HOST` (workspace URL) and `DATABRICKS_TOKEN`
+(a personal access token, or better, a service principal's token).
 
 ## Repo layout
 
@@ -282,6 +285,11 @@ Needs `mlflow>=3.1.3` and `databricks-agents>=1.1.0`.
 │   ├── 03_register_tools.py   # create the 3 tools as governed Unity Catalog SQL functions
 │   ├── agent.py               # servable MLflow ChatAgent (calls the UC functions)
 │   └── 04_deploy.py           # log → register to UC → deploy (serving endpoint + Review App)
+├── resources/
+│   └── cpg_pipeline.job.yml   # bundle job: setup → register_tools → deploy_agent
+├── .github/workflows/
+│   └── deploy.yml             # CI/CD: validate → deploy → run on push to master
+├── databricks.yml             # bundle config (target: prod)
 ├── pyproject.toml             # local dev deps (uv) — mainly kagglehub
 ├── uv.lock
 └── README.md
@@ -303,8 +311,8 @@ uv sync
 
 ## Notes & caveats
 
-- **SQL injection:** the tools interpolate `department` directly into SQL. Fine
-  for a trusted demo; parameterize before any real-world use.
+- **SQL injection:** fixed — `02_agent.py` uses parameterized `spark.sql(..., args=...)`
+  and the UC functions take `department` as a typed parameter.
 - **Catalog name** `databricks_cpg` is hardcoded — change it everywhere if your
   workspace differs.
 - Promotion detection is heuristic: a row counts as "on promo" when `display` or
